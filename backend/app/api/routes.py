@@ -16,6 +16,7 @@ from app.core.security import create_token, verify_password
 from app.db.session import get_db
 from app.models.audit import AuditLog
 from app.models.core import Asset, Finding, User
+from app.models.ml import ModelRegistry
 from app.models.observation import Observation, Source, observation_hash
 from app.models.risk_assessment import RiskAssessment
 from app.models.vulnerability import KEVEntry, Vulnerability
@@ -61,6 +62,11 @@ class ScanImportRequest(BaseModel):
     format: str | None = None
     filename: str | None = None
     source_name: str = "scan-import"
+
+
+class AnomalyRequest(BaseModel):
+    features: dict[str, float | int | str | bool]
+    baseline: dict[str, dict[str, float]] = {}
 
 
 async def current_user(
@@ -298,6 +304,18 @@ async def list_kev(
     db: AsyncSession = Depends(get_db),
 ):
     return list((await db.scalars(select(KEVEntry).order_by(KEVEntry.due_date))).all())
+
+
+@router.get("/ml/models")
+async def list_ml_models(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list((await db.scalars(select(ModelRegistry).order_by(ModelRegistry.name))).all())
+
+
+@router.post("/anomalies/score")
+async def score_anomaly(payload: AnomalyRequest, _: User = Depends(current_user)):
+    from app.services.anomaly import score_anomaly
+
+    return score_anomaly(payload.features, payload.baseline)
 
 
 @router.post("/assistant/query")
