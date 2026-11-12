@@ -18,7 +18,9 @@ class KubernetesConnector(Connector):
     source_type = "kubernetes"
     capabilities = frozenset({"agentless-discovery", "api", "read", "scheduled"})
 
-    def __init__(self, *, client: Any = None, config_file: str | None = None, in_cluster: bool = False):
+    def __init__(
+        self, *, client: Any = None, config_file: str | None = None, in_cluster: bool = False
+    ):
         if client is None:
             try:
                 from kubernetes import client as kube_client
@@ -71,7 +73,10 @@ class KubernetesConnector(Connector):
         metadata = getattr(item, "metadata", None)
         return normalize_observation(
             {
-                "asset_identifiers": {"kubernetes_uid": getattr(metadata, "uid", None), **identifiers},
+                "asset_identifiers": {
+                    "kubernetes_uid": getattr(metadata, "uid", None),
+                    **identifiers,
+                },
                 "observed_attributes": {
                     "kind": kind,
                     "labels": getattr(metadata, "labels", {}) or {},

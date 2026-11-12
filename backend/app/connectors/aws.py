@@ -18,7 +18,13 @@ class AWSConnector(Connector):
     source_type = "aws"
     capabilities = frozenset({"agentless-discovery", "api", "read", "scheduled"})
 
-    def __init__(self, *, session: Any = None, region_name: str | None = None, profile_name: str | None = None):
+    def __init__(
+        self,
+        *,
+        session: Any = None,
+        region_name: str | None = None,
+        profile_name: str | None = None,
+    ):
         if session is None:
             try:
                 import boto3
@@ -29,14 +35,18 @@ class AWSConnector(Connector):
             try:
                 session = boto3.Session(region_name=region_name, profile_name=profile_name)
             except Exception as exc:
-                raise ConnectorConfigurationError(f"AWS configuration is unavailable: {exc}") from exc
+                raise ConnectorConfigurationError(
+                    f"AWS configuration is unavailable: {exc}"
+                ) from exc
         self.session = session
 
     def validate_connectivity(self) -> None:
         try:
             self.session.client("sts").get_caller_identity()
         except Exception as exc:
-            raise ConnectorConfigurationError(f"AWS credentials or endpoint are unavailable: {exc}") from exc
+            raise ConnectorConfigurationError(
+                f"AWS credentials or endpoint are unavailable: {exc}"
+            ) from exc
 
     def collect(self) -> Iterable[Observation]:
         yield from self._ec2()
@@ -46,7 +56,9 @@ class AWSConnector(Connector):
         yield from self._s3()
         yield from self._elbs()
 
-    def _observation(self, kind: str, identifiers: dict[str, Any], attributes: dict[str, Any]) -> Observation:
+    def _observation(
+        self, kind: str, identifiers: dict[str, Any], attributes: dict[str, Any]
+    ) -> Observation:
         return normalize_observation(
             {"asset_identifiers": identifiers, "observed_attributes": {"kind": kind, **attributes}},
             source_type=self.source_type,
@@ -58,7 +70,9 @@ class AWSConnector(Connector):
         for page in self.session.client("ec2").get_paginator("describe_instances").paginate():
             for reservation in page.get("Reservations", []):
                 for instance in reservation.get("Instances", []):
-                    yield self._observation("ec2_instance", {"instance_id": instance.get("InstanceId")}, instance)
+                    yield self._observation(
+                        "ec2_instance", {"instance_id": instance.get("InstanceId")}, instance
+                    )
 
     def _vpcs(self) -> Iterable[Observation]:
         for item in self.session.client("ec2").describe_vpcs().get("Vpcs", []):
@@ -70,12 +84,18 @@ class AWSConnector(Connector):
 
     def _rds(self) -> Iterable[Observation]:
         for item in self.session.client("rds").describe_db_instances().get("DBInstances", []):
-            yield self._observation("rds_instance", {"db_instance_id": item.get("DBInstanceIdentifier")}, item)
+            yield self._observation(
+                "rds_instance", {"db_instance_id": item.get("DBInstanceIdentifier")}, item
+            )
 
     def _s3(self) -> Iterable[Observation]:
         for item in self.session.client("s3").list_buckets().get("Buckets", []):
-            yield self._observation("s3_bucket", {"bucket": item.get("Name")}, {"created": item.get("CreationDate")})
+            yield self._observation(
+                "s3_bucket", {"bucket": item.get("Name")}, {"created": item.get("CreationDate")}
+            )
 
     def _elbs(self) -> Iterable[Observation]:
         for item in self.session.client("elbv2").describe_load_balancers().get("LoadBalancers", []):
-            yield self._observation("load_balancer", {"load_balancer_arn": item.get("LoadBalancerArn")}, item)
+            yield self._observation(
+                "load_balancer", {"load_balancer_arn": item.get("LoadBalancerArn")}, item
+            )

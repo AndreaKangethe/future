@@ -20,7 +20,9 @@ class DockerConnector(Connector):
 
     def __init__(self, *, client: Any = None, enabled: bool = True) -> None:
         if not enabled:
-            raise ConnectorConfigurationError("Docker connector is disabled; set enabled=True to opt in")
+            raise ConnectorConfigurationError(
+                "Docker connector is disabled; set enabled=True to opt in"
+            )
         if client is None:
             try:
                 import docker
@@ -31,9 +33,7 @@ class DockerConnector(Connector):
             try:
                 client = docker.from_env()
             except Exception as exc:
-                raise ConnectorConfigurationError(
-                    f"Docker Engine is unavailable: {exc}"
-                ) from exc
+                raise ConnectorConfigurationError(f"Docker Engine is unavailable: {exc}") from exc
         self.client = client
 
     def validate_connectivity(self) -> None:
