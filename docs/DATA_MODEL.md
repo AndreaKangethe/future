@@ -13,4 +13,14 @@ erDiagram
   ASSETS ||--o{ FINDINGS : has
   ASSETS ||--o{ OBSERVATIONS : reconciles
   ASSETS ||--o{ RISK_ASSESSMENTS : receives
+  INVESTIGATIONS ||--o{ INVESTIGATION_NOTES : contains
+  INVESTIGATIONS ||--o{ INVESTIGATION_TIMELINE : records
 ```
+
+The investigations/report persistence slice adds `investigations` with an owner,
+workflow status, and conclusions; append-only analyst-oriented
+`investigation_notes` and `investigation_timeline` records; and report metadata
+in `reports`. Report metadata keeps the report type, scope, evidence sources,
+limitations, and object-storage reference separate from generated report content.
+The async service helpers flush records so callers can compose them into a
+transaction and commit at the API or worker boundary.

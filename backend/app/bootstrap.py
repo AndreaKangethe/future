@@ -3,8 +3,10 @@ import asyncio
 from sqlalchemy import select
 
 import app.models.audit
+import app.models.investigation
 import app.models.ml
 import app.models.observation
+import app.models.report
 import app.models.risk_assessment
 import app.models.vulnerability  # noqa: F401
 from app.core.config import get_settings

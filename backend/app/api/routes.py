@@ -16,8 +16,10 @@ from app.core.security import create_token, verify_password
 from app.db.session import get_db
 from app.models.audit import AuditLog
 from app.models.core import Asset, Finding, User
+from app.models.investigation import Investigation, InvestigationNote, InvestigationTimeline
 from app.models.ml import ModelRegistry
 from app.models.observation import Observation, Source, observation_hash
+from app.models.report import Report
 from app.models.risk_assessment import RiskAssessment
 from app.models.vulnerability import KEVEntry, Vulnerability
 from app.pipeline.observation import (
@@ -33,12 +35,22 @@ from app.schemas.core import (
     LoginRequest,
     TokenResponse,
 )
+from app.schemas.investigation import (
+    InvestigationCreate,
+    InvestigationNoteCreate,
+    InvestigationNoteResponse,
+    InvestigationResponse,
+    InvestigationTimelineCreate,
+    InvestigationTimelineResponse,
+    InvestigationUpdate,
+)
 from app.schemas.observation import (
     ObservationCreate,
     ObservationResponse,
     SourceCreate,
     SourceResponse,
 )
+from app.schemas.report import ReportCreate, ReportResponse, ReportUpdate
 from app.schemas.vulnerability import KEVEntryResponse, VulnerabilityResponse
 
 router = APIRouter(prefix="/api")
@@ -461,3 +473,146 @@ async def list_audit(
     return list(
         (await db.scalars(select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit))).all()
     )
+
+
+@router.get("/investigations", response_model=list[InvestigationResponse])
+async def list_investigations(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list(
+        (await db.scalars(select(Investigation).order_by(Investigation.updated_at.desc()))).all()
+    )
+
+
+@router.post("/investigations", response_model=InvestigationResponse, status_code=201)
+async def create_investigation(
+    payload: InvestigationCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    investigation = Investigation(
+        **payload.model_dump(exclude_none=True),
+        owner_id=payload.owner_id or str(user.id),
+    )
+    db.add(investigation)
+    await db.commit()
+    await db.refresh(investigation)
+    return investigation
+
+
+@router.patch("/investigations/{investigation_id}", response_model=InvestigationResponse)
+async def update_investigation(
+    investigation_id: UUID,
+    payload: InvestigationUpdate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    investigation = await db.get(Investigation, str(investigation_id))
+    if not investigation:
+        raise HTTPException(404, "Investigation not found")
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(investigation, key, str(value) if key == "owner_id" and value else value)
+    await db.commit()
+    await db.refresh(investigation)
+    return investigation
+
+
+@router.post(
+    "/investigations/{investigation_id}/notes",
+    response_model=InvestigationNoteResponse,
+    status_code=201,
+)
+async def add_investigation_note(
+    investigation_id: UUID,
+    payload: InvestigationNoteCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await db.get(Investigation, str(investigation_id)):
+        raise HTTPException(404, "Investigation not found")
+    note = InvestigationNote(
+        investigation_id=str(investigation_id),
+        author_id=str(payload.author_id or user.id),
+        body=payload.body,
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return note
+
+
+@router.get(
+    "/investigations/{investigation_id}/timeline",
+    response_model=list[InvestigationTimelineResponse],
+)
+async def investigation_timeline(
+    investigation_id: UUID,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await db.get(Investigation, str(investigation_id)):
+        raise HTTPException(404, "Investigation not found")
+    return list(
+        (
+            await db.scalars(
+                select(InvestigationTimeline)
+                .where(InvestigationTimeline.investigation_id == str(investigation_id))
+                .order_by(InvestigationTimeline.occurred_at)
+            )
+        ).all()
+    )
+
+
+@router.post(
+    "/investigations/{investigation_id}/timeline",
+    response_model=InvestigationTimelineResponse,
+    status_code=201,
+)
+async def add_investigation_timeline(
+    investigation_id: UUID,
+    payload: InvestigationTimelineCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not await db.get(Investigation, str(investigation_id)):
+        raise HTTPException(404, "Investigation not found")
+    event = InvestigationTimeline(
+        investigation_id=str(investigation_id),
+        actor_id=str(payload.actor_id or user.id),
+        **payload.model_dump(exclude={"actor_id"}),
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
+@router.get("/reports", response_model=list[ReportResponse])
+async def list_reports(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list((await db.scalars(select(Report).order_by(Report.generated_at.desc()))).all())
+
+
+@router.post("/reports", response_model=ReportResponse, status_code=201)
+async def create_report(
+    payload: ReportCreate, _: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+):
+    report = Report(**payload.model_dump(exclude_none=True))
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+@router.patch("/reports/{report_id}", response_model=ReportResponse)
+async def update_report(
+    report_id: UUID,
+    payload: ReportUpdate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    report = await db.get(Report, str(report_id))
+    if not report:
+        raise HTTPException(404, "Report not found")
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(report, key, value)
+    await db.commit()
+    await db.refresh(report)
+    return report
