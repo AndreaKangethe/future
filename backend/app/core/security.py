@@ -55,10 +55,10 @@ async def assign_role(
     return role
 
 
-def create_token(subject: str) -> str:
+def create_token(subject: str, *, token_type: str = "access", hours: int = 8) -> str:
     now = datetime.now(UTC)
     return jwt.encode(
-        {"sub": subject, "iat": now, "exp": now + timedelta(hours=8)},
+        {"sub": subject, "typ": token_type, "iat": now, "exp": now + timedelta(hours=hours)},
         get_settings().jwt_secret,
         algorithm="HS256",
     )

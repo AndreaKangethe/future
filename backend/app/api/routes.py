@@ -93,9 +93,12 @@ async def current_user(
     if not credentials:
         raise HTTPException(401, "Authentication required")
     try:
-        subject = jwt.decode(
+        claims = jwt.decode(
             credentials.credentials, get_settings().jwt_secret, algorithms=["HS256"]
-        ).get("sub")
+        )
+        if claims.get("typ", "access") != "access":
+            raise HTTPException(401, "Access token required")
+        subject = claims.get("sub")
     except JWTError as exc:
         raise HTTPException(401, "Invalid token") from exc
     user = await db.scalar(select(User).where(User.email == subject))
@@ -109,7 +112,32 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(401, "Invalid credentials")
-    return TokenResponse(access_token=create_token(user.email))
+    return TokenResponse(
+        access_token=create_token(user.email),
+        refresh_token=create_token(user.email, token_type="refresh", hours=24 * 30),
+    )
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        claims = jwt.decode(payload.refresh_token, get_settings().jwt_secret, algorithms=["HS256"])
+    except JWTError as exc:
+        raise HTTPException(401, "Invalid refresh token") from exc
+    if claims.get("typ") != "refresh":
+        raise HTTPException(401, "Refresh token required")
+    email = claims.get("sub")
+    user = await db.scalar(select(User).where(User.email == email))
+    if not user:
+        raise HTTPException(401, "User not found")
+    return TokenResponse(
+        access_token=create_token(user.email),
+        refresh_token=create_token(user.email, token_type="refresh", hours=24 * 30),
+    )
 
 
 @router.post("/observations/sources", response_model=SourceResponse)
