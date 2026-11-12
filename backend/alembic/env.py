@@ -1,22 +1,12 @@
-from logging.config import fileConfig
 import asyncio
+from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
-import app.models.audit
-import app.models.core
-import app.models.integration
-import app.models.investigation
-import app.models.ml
-import app.models.observation
-import app.models.relationship
-import app.models.report
-import app.models.risk_assessment
-import app.models.vulnerability
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
@@ -26,7 +16,9 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline():
-    context.configure(url=get_settings().database_url, target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=get_settings().database_url, target_metadata=target_metadata, literal_binds=True
+    )
     with context.begin_transaction():
         context.run_migrations()
 

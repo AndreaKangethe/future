@@ -12,8 +12,23 @@ dependency is unavailable, `render_report_pdf` raises an explicit
 
 Authenticated observation endpoints:
 
+External intelligence ingestion is exposed as Python service interfaces rather
+than application-startup network calls. Use `NVDClient`, `CISAKEVLoader`, and
+`MITREAttackLoader` from `app.services.intelligence`; each returns a
+`LoadResult` and falls back to local seed data when an upstream is unavailable.
+
 - `POST /api/observations` accepts a manual observation, normalizes identifiers,
   computes quality flags/score, and stores an immutable record with a deduplication hash.
 - `GET /api/observations` lists observations with optional `source_id`,
   `processing_status`, `limit`, and `offset` filters.
 - `POST /api/observations/sources` registers a source for submitted observations.
+
+## Assistant providers and grounding
+
+`app.assistant.provider` exposes an `AssistantProvider` contract, a deterministic
+offline provider, and an optional SDK-free `AnthropicProvider`. The provider
+falls back to the offline evidence summary when `ANTHROPIC_API_KEY` is absent;
+HTTP clients may be injected for tests or deployments. `app.assistant.grounding`
+contains the permission-checked, read-only tool registry, citation
+post-validation, and `format_sse` helper. Assistant citations are accepted only
+when their record type and ID occur in accessible tool evidence.

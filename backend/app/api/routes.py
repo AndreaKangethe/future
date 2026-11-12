@@ -11,7 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.assistant.fallback import Evidence, summarize
+from app.assistant.fallback import Evidence
+from app.assistant.provider import AssistantRequest, DeterministicFallbackProvider
 from app.connectors.scan_import import import_scan
 from app.core.config import get_settings
 from app.core.security import create_token, verify_password
@@ -407,7 +408,10 @@ async def assistant_query(
         )
         for asset in assets
     ]
-    return summarize(payload.question, evidence)
+    response = await DeterministicFallbackProvider().complete(
+        AssistantRequest(question=payload.question, evidence=tuple(evidence))
+    )
+    return response.as_dict()
 
 
 @router.post("/risk-assessments/preview")

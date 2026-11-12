@@ -6,17 +6,6 @@ explicit Alembic operations for controlled production changes.
 """
 
 from alembic import op
-
-import app.models.audit
-import app.models.core
-import app.models.integration
-import app.models.investigation
-import app.models.ml
-import app.models.observation
-import app.models.relationship
-import app.models.report
-import app.models.risk_assessment
-import app.models.vulnerability
 from app.db.base import Base
 
 revision = "0001_initial"
@@ -28,6 +17,14 @@ depends_on = None
 def upgrade():
     bind = op.get_bind()
     Base.metadata.create_all(bind=bind)
+    if bind.dialect.name == "postgresql":
+        op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+        for table, column in (
+            ("observations", "observation_timestamp"),
+            ("model_inferences", "created_at"),
+            ("risk_assessments", "created_at"),
+        ):
+            op.execute(f"SELECT create_hypertable('{table}', '{column}', if_not_exists => TRUE)")
 
 
 def downgrade():
