@@ -87,6 +87,11 @@ class AnomalyRequest(BaseModel):
     baseline: dict[str, dict[str, float]] = {}
 
 
+class IdentityResolveRequest(BaseModel):
+    observation_identifiers: dict[str, object]
+    candidate_identifiers: dict[str, object]
+
+
 async def current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer), db: AsyncSession = Depends(get_db)
 ):
@@ -362,6 +367,25 @@ async def score_anomaly(payload: AnomalyRequest, _: User = Depends(current_user)
     from app.services.anomaly import score_anomaly
 
     return score_anomaly(payload.features, payload.baseline)
+
+
+@router.post("/identity/resolve")
+async def resolve_identity_endpoint(
+    payload: IdentityResolveRequest, _: User = Depends(current_user)
+):
+    from app.services.identity import resolve_identity
+
+    decision = resolve_identity(
+        payload.observation_identifiers,
+        payload.candidate_identifiers,
+    )
+    return {
+        "outcome": decision.outcome,
+        "score": decision.score,
+        "evidence": decision.evidence,
+        "reason": decision.reason,
+        "epistemic_class": "inferred",
+    }
 
 
 @router.post("/assistant/query")
