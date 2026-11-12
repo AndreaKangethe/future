@@ -2,6 +2,8 @@ import asyncio
 
 from sqlalchemy import select
 
+import app.models.observation
+import app.models.risk_assessment  # noqa: F401
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.base import Base
