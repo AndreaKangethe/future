@@ -42,3 +42,23 @@ class FindingResponse(BaseModel):
     status: str
     epistemic_class: str
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserResponse(BaseModel):
+    id: UUID
+    email: str
+    role: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RoleResponse(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RoleAssignment(BaseModel):
+    role: str = Field(min_length=1, max_length=50)

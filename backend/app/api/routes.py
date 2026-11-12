@@ -15,10 +15,10 @@ from app.assistant.fallback import Evidence
 from app.assistant.provider import AssistantRequest, DeterministicFallbackProvider
 from app.connectors.scan_import import import_scan
 from app.core.config import get_settings
-from app.core.security import create_token, verify_password
+from app.core.security import assign_role, create_token, get_user_roles, verify_password
 from app.db.session import get_db
 from app.models.audit import AuditLog
-from app.models.core import Asset, Finding, User
+from app.models.core import Asset, Finding, Role, User
 from app.models.integration import Integration
 from app.models.investigation import Investigation, InvestigationNote, InvestigationTimeline
 from app.models.ml import ModelRegistry
@@ -38,7 +38,10 @@ from app.schemas.core import (
     AssetResponse,
     FindingResponse,
     LoginRequest,
+    RoleAssignment,
+    RoleResponse,
     TokenResponse,
+    UserResponse,
 )
 from app.schemas.integration import IntegrationCreate, IntegrationResponse, IntegrationUpdate
 from app.schemas.investigation import (
@@ -149,6 +152,35 @@ async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_
         access_token=create_token(user.email),
         refresh_token=create_token(user.email, token_type="refresh", hours=24 * 30),
     )
+
+
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list((await db.scalars(select(User).order_by(User.email))).all())
+
+
+@router.get("/roles", response_model=list[RoleResponse])
+async def list_roles(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list((await db.scalars(select(Role).order_by(Role.name))).all())
+
+
+@router.post("/users/{user_id}/roles")
+async def assign_user_role(
+    user_id: UUID,
+    payload: RoleAssignment,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await db.get(User, str(user_id))
+    if not user:
+        raise HTTPException(404, "User not found")
+    role = await assign_role(db, user, payload.role)
+    await db.commit()
+    return {
+        "user_id": user.id,
+        "roles": sorted(await get_user_roles(db, user)),
+        "assigned": role.name,
+    }
 
 
 @router.post("/observations/sources", response_model=SourceResponse)
