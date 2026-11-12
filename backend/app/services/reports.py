@@ -27,10 +27,7 @@ def _report_metadata(report: Mapping[str, Any] | Any) -> dict[str, Any]:
     def value(field: str) -> Any:
         return report.get(field) if isinstance(report, Mapping) else getattr(report, field, None)
 
-    return {
-        field: _serialize_value(value(field))
-        for field in REPORT_FIELDS
-    }
+    return {field: _serialize_value(value(field)) for field in REPORT_FIELDS}
 
 
 def _serialize_value(value: Any) -> Any:
@@ -56,7 +53,9 @@ def render_report_csv(report: Mapping[str, Any] | Any) -> str:
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(("field", "value"))
     for field, value in _report_metadata(report).items():
-        rendered = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
+        rendered = (
+            json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
+        )
         writer.writerow((field, "" if rendered is None else rendered))
     return output.getvalue()
 
@@ -91,6 +90,7 @@ def render_report_pdf(report: Mapping[str, Any] | Any) -> bytes:
             canvas.setFont("Helvetica", 10)
     canvas.save()
     return output.getvalue()
+
 
 __all__ = [
     "ReportPdfUnsupportedError",
