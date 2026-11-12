@@ -3,14 +3,16 @@ import asyncio
 from sqlalchemy import select
 
 import app.models.audit
+import app.models.integration
 import app.models.investigation
 import app.models.ml
 import app.models.observation
+import app.models.relationship
 import app.models.report
 import app.models.risk_assessment
 import app.models.vulnerability  # noqa: F401
 from app.core.config import get_settings
-from app.core.security import hash_password
+from app.core.security import assign_role, hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.core import User
@@ -43,14 +45,15 @@ async def main():
             select(User).where(User.email == settings.bootstrap_admin_email.lower())
         )
         if not existing:
-            db.add(
-                User(
-                    email=settings.bootstrap_admin_email.lower(),
-                    password_hash=hash_password(settings.bootstrap_admin_password),
-                    role="admin",
-                )
+            existing = User(
+                email=settings.bootstrap_admin_email.lower(),
+                password_hash=hash_password(settings.bootstrap_admin_password),
+                role="admin",
             )
-            await db.commit()
+            db.add(existing)
+            await db.flush()
+        await assign_role(db, existing, "admin", "Platform administrator")
+        await db.commit()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
+import json
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, Field
@@ -16,9 +18,11 @@ from app.core.security import create_token, verify_password
 from app.db.session import get_db
 from app.models.audit import AuditLog
 from app.models.core import Asset, Finding, User
+from app.models.integration import Integration
 from app.models.investigation import Investigation, InvestigationNote, InvestigationTimeline
 from app.models.ml import ModelRegistry
 from app.models.observation import Observation, Source, observation_hash
+from app.models.relationship import Relationship
 from app.models.report import Report
 from app.models.risk_assessment import RiskAssessment
 from app.models.vulnerability import KEVEntry, Vulnerability
@@ -35,6 +39,7 @@ from app.schemas.core import (
     LoginRequest,
     TokenResponse,
 )
+from app.schemas.integration import IntegrationCreate, IntegrationResponse, IntegrationUpdate
 from app.schemas.investigation import (
     InvestigationCreate,
     InvestigationNoteCreate,
@@ -50,6 +55,7 @@ from app.schemas.observation import (
     SourceCreate,
     SourceResponse,
 )
+from app.schemas.relationship import RelationshipCreate, RelationshipResponse, RelationshipUpdate
 from app.schemas.report import ReportCreate, ReportResponse, ReportUpdate
 from app.schemas.vulnerability import KEVEntryResponse, VulnerabilityResponse
 
@@ -616,3 +622,145 @@ async def update_report(
     await db.commit()
     await db.refresh(report)
     return report
+
+
+@router.get("/reports/{report_id}/export")
+async def export_report(
+    report_id: UUID,
+    format: str = Query(default="json", pattern="^(json|csv)$"),
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    report = await db.get(Report, str(report_id))
+    if not report:
+        raise HTTPException(404, "Report not found")
+    data = {
+        "id": report.id,
+        "report_type": report.report_type,
+        "status": report.status,
+        "scope": report.scope,
+        "generated_at": report.generated_at.isoformat(),
+        "evidence_sources": report.evidence_sources,
+        "limitations": report.limitations,
+        "object_ref": report.object_ref,
+    }
+    if format == "json":
+        body = json.dumps(data, indent=2)
+        media_type = "application/json"
+    else:
+        body = "field,value\n" + "\n".join(
+            f"{key},{json.dumps(value)}" for key, value in data.items()
+        )
+        media_type = "text/csv"
+    return StreamingResponse(iter([body]), media_type=media_type)
+
+
+@router.get("/events/stream")
+async def events_stream(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    assets = list(
+        (await db.scalars(select(Asset).order_by(Asset.updated_at.desc()).limit(10))).all()
+    )
+
+    async def stream():
+        for asset in assets:
+            yield f"data: {json.dumps({'type': 'asset_activity', 'asset_id': str(asset.id), 'name': asset.name, 'epistemic_class': asset.epistemic_class})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.get("/relationships", response_model=list[RelationshipResponse])
+async def list_relationships(
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    asset_id: UUID | None = None,
+):
+    query = select(Relationship).order_by(Relationship.confidence.desc()).limit(1000)
+    if asset_id:
+        query = query.where(
+            (Relationship.source_asset_id == str(asset_id))
+            | (Relationship.target_asset_id == str(asset_id))
+        )
+    return list((await db.scalars(query)).all())
+
+
+@router.post("/relationships", response_model=RelationshipResponse, status_code=201)
+async def create_relationship(
+    payload: RelationshipCreate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    for asset_id in (payload.source_asset_id, payload.target_asset_id):
+        if not await db.get(Asset, str(asset_id)):
+            raise HTTPException(404, "Relationship asset not found")
+    relationship = Relationship(**payload.model_dump())
+    relationship.source_asset_id = str(payload.source_asset_id)
+    relationship.target_asset_id = str(payload.target_asset_id)
+    db.add(relationship)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "Relationship already exists") from exc
+    await db.refresh(relationship)
+    return relationship
+
+
+@router.patch("/relationships/{relationship_id}", response_model=RelationshipResponse)
+async def update_relationship(
+    relationship_id: UUID,
+    payload: RelationshipUpdate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    relationship = await db.get(Relationship, str(relationship_id))
+    if not relationship:
+        raise HTTPException(404, "Relationship not found")
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(relationship, key, value)
+    await db.commit()
+    await db.refresh(relationship)
+    return relationship
+
+
+@router.get("/integrations", response_model=list[IntegrationResponse])
+async def list_integrations(_: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    return list((await db.scalars(select(Integration).order_by(Integration.name))).all())
+
+
+@router.post("/integrations", response_model=IntegrationResponse, status_code=201)
+async def create_integration(
+    payload: IntegrationCreate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    data = payload.model_dump(exclude={"credentials_encrypted"})
+    integration = Integration(
+        **data,
+        credentials_encrypted=None,
+    )
+    db.add(integration)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "Integration already exists") from exc
+    await db.refresh(integration)
+    return integration
+
+
+@router.patch("/integrations/{integration_id}", response_model=IntegrationResponse)
+async def update_integration(
+    integration_id: UUID,
+    payload: IntegrationUpdate,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    integration = await db.get(Integration, str(integration_id))
+    if not integration:
+        raise HTTPException(404, "Integration not found")
+    values = payload.model_dump(exclude_none=True, exclude={"credentials_encrypted"})
+    for key, value in values.items():
+        setattr(integration, key, value)
+    await db.commit()
+    await db.refresh(integration)
+    return integration

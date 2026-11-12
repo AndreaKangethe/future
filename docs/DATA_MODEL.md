@@ -24,3 +24,11 @@ in `reports`. Report metadata keeps the report type, scope, evidence sources,
 limitations, and object-storage reference separate from generated report content.
 The async service helpers flush records so callers can compose them into a
 transaction and commit at the API or worker boundary.
+
+The relationship/integration slice adds `relationships`, which connects two
+assets with a typed, confidence-scored edge and JSON evidence/metadata, and
+`integrations`, which stores connector provider state and JSON configuration.
+Integration credentials are intentionally not modeled as plaintext: only a
+masked display value and an encrypted/secret-store reference placeholder may
+be persisted. Both slices expose async service helpers that flush without
+committing, so callers retain transaction ownership.
