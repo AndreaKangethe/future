@@ -5,5 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 COPY app app
+COPY alembic.ini .
+COPY alembic alembic
 COPY tests tests
 USER nobody
