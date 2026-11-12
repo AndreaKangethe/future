@@ -1,3 +1,9 @@
+from types import SimpleNamespace
+
+from app.connectors.aws import AWSConnector
+from app.connectors.demo import DemoConnector
+from app.connectors.docker import DockerConnector
+from app.connectors.kubernetes import KubernetesConnector
 from app.connectors.scan_import import (
     import_scan,
     parse_csv,
@@ -5,6 +11,113 @@ from app.connectors.scan_import import (
     parse_nessus_csv,
     parse_nmap_xml,
 )
+
+
+def test_demo_connector_is_deterministic_and_declares_capabilities():
+    observations = list(DemoConnector().collect())
+    assert len(observations) == 2
+    assert "read" in DemoConnector.capabilities
+    assert observations[0]["source_type"] == "demo"
+
+
+def test_docker_connector_uses_only_read_operations():
+    container = SimpleNamespace(
+        id="abc",
+        name="web",
+        status="running",
+        attrs={
+            "Config": {"Image": "nginx", "Labels": {"tier": "web"}},
+            "State": {"Status": "running"},
+            "NetworkSettings": {"Ports": {}},
+        },
+    )
+    image = SimpleNamespace(id="sha256:image", tags=["nginx:latest"], attrs={"Size": 10})
+
+    class Client:
+        containers = SimpleNamespace(list=lambda all=False: [container])
+        images = SimpleNamespace(list=lambda: [image])
+
+        def version(self):
+            return {"Version": "test"}
+
+    observations = list(DockerConnector(client=Client()).collect())
+    assert [item["observed_attributes"]["kind"] for item in observations] == ["container", "image"]
+
+
+def test_kubernetes_connector_collects_resources_from_mocked_clients():
+    metadata = SimpleNamespace(name="web", namespace="default", uid="uid-1", labels={"app": "web"})
+    resource = SimpleNamespace(metadata=metadata)
+
+    class Core:
+        def list_node(self):
+            return SimpleNamespace(items=[resource])
+
+        def list_pod_for_all_namespaces(self):
+            return SimpleNamespace(items=[resource])
+
+        def list_service_for_all_namespaces(self):
+            return SimpleNamespace(items=[resource])
+
+        def list_namespace(self):
+            return SimpleNamespace(items=[resource])
+
+    class Apps:
+        def list_deployment_for_all_namespaces(self):
+            return SimpleNamespace(items=[resource])
+
+    client = SimpleNamespace(CoreV1Api=lambda: Core(), AppsV1Api=lambda: Apps())
+    observations = list(KubernetesConnector(client=client).collect())
+    assert len(observations) == 5
+    assert {item["observed_attributes"]["kind"] for item in observations} == {
+        "node",
+        "pod",
+        "service",
+        "namespace",
+        "deployment",
+    }
+
+
+def test_aws_connector_collects_metadata_with_mocked_session():
+    class Paginator:
+        def paginate(self):
+            return [{"Reservations": [{"Instances": [{"InstanceId": "i-1"}]}]}]
+
+    class Client:
+        def __init__(self, service):
+            self.service = service
+
+        def get_paginator(self, _):
+            return Paginator()
+
+        def describe_vpcs(self):
+            return {"Vpcs": [{"VpcId": "vpc-1"}]}
+
+        def describe_security_groups(self):
+            return {"SecurityGroups": [{"GroupId": "sg-1"}]}
+
+        def describe_db_instances(self):
+            return {"DBInstances": [{"DBInstanceIdentifier": "db-1"}]}
+
+        def list_buckets(self):
+            return {"Buckets": [{"Name": "bucket-1"}]}
+
+        def describe_load_balancers(self):
+            return {"LoadBalancers": [{"LoadBalancerArn": "arn:lb"}]}
+
+    class Session:
+        def client(self, service):
+            return Client(service)
+
+    observations = list(AWSConnector(session=Session()).collect())
+    assert len(observations) == 6
+    assert {item["observed_attributes"]["kind"] for item in observations} == {
+        "ec2_instance",
+        "vpc",
+        "security_group",
+        "rds_instance",
+        "s3_bucket",
+        "load_balancer",
+    }
 
 
 def test_nmap_xml_emits_normalized_host_and_services():

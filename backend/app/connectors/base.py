@@ -10,6 +10,19 @@ from typing import Any
 from app.pipeline.observation import normalize_identifiers, normalize_timestamp
 
 Observation = dict[str, Any]
+Capability = str
+
+
+class ConnectorError(RuntimeError):
+    """Base error for connector configuration, dependency, and target failures."""
+
+
+class ConnectorConfigurationError(ConnectorError):
+    """The connector is not configured for use."""
+
+
+class ConnectorDependencyError(ConnectorError):
+    """An optional SDK required by a connector is not installed."""
 
 
 def normalize_observation(
@@ -58,9 +71,36 @@ def _timestamp(value: Any) -> datetime | None:
 
 
 class Connector(ABC):
-    """Minimal read-only connector interface."""
+    """Read-only connector interface shared by external adapters."""
 
     source_type: str
+    capabilities: frozenset[Capability] = frozenset({"api", "read"})
+
+    def configure(self, **_: Any) -> None:
+        """Configure a connector instance; subclasses may validate settings."""
+
+    def authenticate(self) -> None:
+        """Authenticate without changing the target."""
+
+    def validate_connectivity(self) -> None:
+        """Raise a connector error when the target cannot be read."""
+
+    def health(self) -> dict[str, Any]:
+        """Return a safe, serializable health result without leaking credentials."""
+        try:
+            self.validate_connectivity()
+        except ConnectorError as exc:
+            return {
+                "status": "unavailable",
+                "source_type": self.source_type,
+                "capabilities": sorted(self.capabilities),
+                "error": str(exc),
+            }
+        return {
+            "status": "ok",
+            "source_type": self.source_type,
+            "capabilities": sorted(self.capabilities),
+        }
 
     @abstractmethod
     def collect(self) -> Iterable[Observation]:

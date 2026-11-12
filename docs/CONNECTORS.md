@@ -25,3 +25,20 @@ Supported entry points are:
 Parsing is deliberately best-effort: source-specific columns are retained rather
 than discarded, and raw payload storage is left to the ingestion service. Parsers
 do not make network calls or modify database records.
+
+## Inventory connectors
+
+The optional inventory adapters expose `collect()` and return the same
+normalized dictionaries. They are read-only by design:
+
+- `DockerConnector` reads containers and images through the Docker Engine API.
+- `KubernetesConnector` reads nodes, pods, services, namespaces, and deployments.
+- `AWSConnector` reads EC2, VPCs, security groups, RDS, S3 bucket metadata, and ELB metadata.
+- `DemoConnector` emits two deterministic synthetic assets without network access.
+
+Each class declares a `capabilities` set and provides `validate_connectivity()`
+and `health()`. Docker, Kubernetes, and AWS SDKs are optional dependencies:
+constructing a connector without its SDK or required configuration raises a
+clear `ConnectorDependencyError` or `ConnectorConfigurationError`. Pass mocked
+clients/sessions to constructors in tests. Credentials are never returned by
+`health()` or included in observations.
