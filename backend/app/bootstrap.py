@@ -2,13 +2,16 @@ import asyncio
 
 from sqlalchemy import select
 
+import app.models.audit
 import app.models.observation
-import app.models.risk_assessment  # noqa: F401
+import app.models.risk_assessment
+import app.models.vulnerability  # noqa: F401
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.core import User
+from app.services.vulnerability_intel import load_offline_snapshot
 
 
 async def main():
@@ -16,6 +19,7 @@ async def main():
         await conn.run_sync(Base.metadata.create_all)
     settings = get_settings()
     async with SessionLocal() as db:
+        await load_offline_snapshot(db)
         existing = await db.scalar(
             select(User).where(User.email == settings.bootstrap_admin_email.lower())
         )

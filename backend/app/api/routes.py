@@ -10,12 +10,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assistant.fallback import Evidence, summarize
+from app.connectors.scan_import import import_scan
 from app.core.config import get_settings
 from app.core.security import create_token, verify_password
 from app.db.session import get_db
+from app.models.audit import AuditLog
 from app.models.core import Asset, Finding, User
 from app.models.observation import Observation, Source, observation_hash
 from app.models.risk_assessment import RiskAssessment
+from app.models.vulnerability import KEVEntry, Vulnerability
 from app.pipeline.observation import (
     normalize_identifiers,
     normalize_timestamp,
@@ -35,6 +38,7 @@ from app.schemas.observation import (
     SourceCreate,
     SourceResponse,
 )
+from app.schemas.vulnerability import KEVEntryResponse, VulnerabilityResponse
 
 router = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
@@ -50,6 +54,13 @@ class RiskQuery(BaseModel):
     externally_exposed: bool = False
     exploited: bool = False
     evidence_confidence: float = Field(default=0.8, ge=0, le=1)
+
+
+class ScanImportRequest(BaseModel):
+    content: str = Field(min_length=1)
+    format: str | None = None
+    filename: str | None = None
+    source_name: str = "scan-import"
 
 
 async def current_user(
@@ -166,6 +177,62 @@ async def list_observations(
     return list((await db.scalars(query.offset(offset).limit(limit))).all())
 
 
+@router.post("/observations/import")
+async def import_observations(
+    payload: ScanImportRequest,
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        imported = import_scan(
+            payload.content,
+            format=payload.format,
+            filename=payload.filename,
+            source_name=payload.source_name,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    source = await db.scalar(select(Source).where(Source.name == payload.source_name))
+    if not source:
+        source = Source(name=payload.source_name, source_type="scan", reliability=0.7)
+        db.add(source)
+        await db.flush()
+    created = 0
+    for item in imported:
+        observed_at = normalize_timestamp(item["observation_timestamp"])
+        identifiers = item["asset_identifiers"]
+        flags = quality_flags(identifiers, observed_at, source_verified=True)
+        observation = Observation(
+            source_id=str(source.id),
+            source_type=item["source_type"],
+            observation_category=item["observation_category"],
+            asset_identifiers=identifiers,
+            observed_attributes=item["observed_attributes"],
+            observation_timestamp=observed_at,
+            collection_timestamp=datetime.now(UTC),
+            raw_ref=item.get("raw_ref"),
+            processing_status="validated",
+            quality_flags=flags,
+            quality_score=quality_score(flags),
+            epistemic_class=item["epistemic_class"],
+            dedup_hash=observation_hash(
+                str(source.id),
+                item["observation_category"],
+                identifiers,
+                item["observed_attributes"],
+                observed_at,
+            ),
+        )
+        db.add(observation)
+        created += 1
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, "One or more imported observations already exist") from exc
+    return {"imported": created, "format": payload.format or payload.filename or "csv"}
+
+
 @router.get("/assets", response_model=list[AssetResponse])
 async def list_assets(
     _: User = Depends(current_user), db: AsyncSession = Depends(get_db), q: str | None = Query(None)
@@ -184,6 +251,16 @@ async def create_asset(
     db.add(asset)
     await db.commit()
     await db.refresh(asset)
+    db.add(
+        AuditLog(
+            user_id=str(_.id),
+            action="create",
+            resource_type="asset",
+            resource_id=str(asset.id),
+            after=payload.model_dump(),
+        )
+    )
+    await db.commit()
     return asset
 
 
@@ -194,6 +271,33 @@ async def list_findings(_: User = Depends(current_user), db: AsyncSession = Depe
             await db.scalars(select(Finding).order_by(Finding.contextual_risk.desc()).limit(500))
         ).all()
     )
+
+
+@router.get("/vulnerabilities", response_model=list[VulnerabilityResponse])
+async def list_vulnerabilities(
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    q: str | None = Query(None),
+    kev_only: bool = False,
+):
+    query = select(Vulnerability).order_by(Vulnerability.cvss_score.desc()).limit(500)
+    if q:
+        query = query.where(
+            Vulnerability.cve_id.ilike(f"%{q}%")
+            | Vulnerability.product.ilike(f"%{q}%")
+            | Vulnerability.description.ilike(f"%{q}%")
+        )
+    if kev_only:
+        query = query.join(KEVEntry)
+    return list((await db.scalars(query)).all())
+
+
+@router.get("/intelligence/kev", response_model=list[KEVEntryResponse])
+async def list_kev(
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return list((await db.scalars(select(KEVEntry).order_by(KEVEntry.due_date))).all())
 
 
 @router.post("/assistant/query")
@@ -328,3 +432,14 @@ async def get_asset(
     if not asset:
         raise HTTPException(404, "Asset not found")
     return asset
+
+
+@router.get("/audit")
+async def list_audit(
+    _: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    return list(
+        (await db.scalars(select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit))).all()
+    )

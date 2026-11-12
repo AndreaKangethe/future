@@ -48,7 +48,12 @@ def parse_nmap_xml(
                 for key, value in (
                     ("port", port.get("portid")),
                     ("protocol", port.get("protocol")),
-                    ("state", port.find("./state").get("state") if port.find("./state") is not None else None),
+                    (
+                        "state",
+                        port.find("./state").get("state")
+                        if port.find("./state") is not None
+                        else None,
+                    ),
                 )
                 if value is not None
             }
@@ -104,8 +109,7 @@ def parse_nessus_csv(
                     "asset_identifiers": identifiers,
                     "observed_attributes": attributes,
                     "observation_category": "finding",
-                    "observation_timestamp": lowered.get("scan_date")
-                    or lowered.get("last_seen"),
+                    "observation_timestamp": lowered.get("scan_date") or lowered.get("last_seen"),
                 },
                 source_type="nessus",
                 source_name=source_name,
@@ -141,7 +145,9 @@ def parse_json(
                 },
             }
         observations.append(
-            normalize_observation(candidate, source_type="json", source_name=source_name, raw_ref=raw_ref)
+            normalize_observation(
+                candidate, source_type="json", source_name=source_name, raw_ref=raw_ref
+            )
         )
     return observations
 
