@@ -93,6 +93,11 @@ class IdentityResolveRequest(BaseModel):
     candidate_identifiers: dict[str, object]
 
 
+class DriftRequest(BaseModel):
+    expected: list[float] = Field(min_length=1)
+    actual: list[float] = Field(min_length=1)
+
+
 async def current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer), db: AsyncSession = Depends(get_db)
 ):
@@ -387,6 +392,13 @@ async def resolve_identity_endpoint(
         "reason": decision.reason,
         "epistemic_class": "inferred",
     }
+
+
+@router.post("/ml/drift")
+async def calculate_drift(payload: DriftRequest, _: User = Depends(current_user)):
+    from app.services.drift import drift_summary
+
+    return drift_summary(payload.expected, payload.actual)
 
 
 @router.post("/assistant/query")
